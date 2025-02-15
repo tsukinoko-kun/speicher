@@ -16,12 +16,16 @@ type (
 		mut      sync.RWMutex
 	}
 
+	// Update the interface first
 	Map[T any] interface {
 		Get(key string) (T, bool)
+		Find(func(T) bool) (value T, found bool)
+		FindAll(func(T) bool) (values []T)
 		Has(key string) bool
 		Set(key string, value T)
-		RangeKV() <-chan MapRangeEl[T]
-		RangeV() <-chan T
+		Overwrite(map[string]T)
+		RangeKV() (<-chan MapRangeEl[T], func())
+		RangeV() (<-chan T, func())
 		Save() error
 		Lock()
 		Unlock()
@@ -35,8 +39,86 @@ type (
 	}
 )
 
+// Update RangeKV method
+func (m *MemoryMap[T]) RangeKV() (<-chan MapRangeEl[T], func()) {
+	ch := make(chan MapRangeEl[T])
+	done := make(chan struct{})
+	cancel := func() {
+		select {
+		case <-done:
+			// channel already closed, no-op
+			return
+		default:
+			close(done)
+		}
+	}
+
+	go func() {
+		defer close(ch)
+		defer close(done)
+		for key, value := range m.data {
+			select {
+			case <-done:
+				return
+			case ch <- MapRangeEl[T]{Key: key, Value: value}:
+			}
+		}
+	}()
+
+	return ch, cancel
+}
+
+// Update RangeV method
+func (m *MemoryMap[T]) RangeV() (<-chan T, func()) {
+	ch := make(chan T)
+	done := make(chan struct{})
+	cancel := func() {
+		select {
+		case <-done:
+			// channel already closed, no-op
+			return
+		default:
+			close(done)
+		}
+	}
+
+	go func() {
+		defer close(ch)
+		defer close(done)
+		for _, value := range m.data {
+			select {
+			case <-done:
+				return
+			case ch <- value:
+			}
+		}
+	}()
+
+	return ch, cancel
+}
+
 func (m *MemoryMap[T]) Get(key string) (value T, found bool) {
 	value, found = m.data[key]
+	return
+}
+
+func (m *MemoryMap[T]) Find(f func(T) bool) (value T, found bool) {
+	for _, value = range m.data {
+		if f(value) {
+			found = true
+			return
+		}
+	}
+	found = false
+	return
+}
+
+func (m *MemoryMap[T]) FindAll(f func(T) bool) (values []T) {
+	for _, value := range m.data {
+		if f(value) {
+			values = append(values, value)
+		}
+	}
 	return
 }
 
@@ -49,26 +131,8 @@ func (m *MemoryMap[T]) Set(key string, value T) {
 	m.data[key] = value
 }
 
-func (m *MemoryMap[T]) RangeKV() <-chan MapRangeEl[T] {
-	ch := make(chan MapRangeEl[T])
-	go func() {
-		defer close(ch)
-		for key, value := range m.data {
-			ch <- MapRangeEl[T]{Key: key, Value: value}
-		}
-	}()
-	return ch
-}
-
-func (m *MemoryMap[T]) RangeV() <-chan T {
-	ch := make(chan T)
-	go func() {
-		defer close(ch)
-		for _, value := range m.data {
-			ch <- value
-		}
-	}()
-	return ch
+func (m *MemoryMap[T]) Overwrite(values map[string]T) {
+	m.data = values
 }
 
 func (m *MemoryMap[T]) Lock() {
