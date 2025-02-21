@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 )
 
 type (
@@ -14,6 +15,11 @@ type (
 		data     map[string]T
 		location string
 		mut      sync.RWMutex
+
+		timerMut     sync.Mutex
+		saveTimer    *time.Timer
+		maxSaveTimer *time.Timer
+		saveOnce     *sync.Once
 	}
 
 	// Update the interface first
@@ -49,13 +55,24 @@ func (m *MemoryMap[T]) RangeKV() (<-chan MapRangeEl[T], func()) {
 			// channel already closed, no-op
 			return
 		default:
-			close(done)
+			if done != nil {
+				close(done)
+				done = nil
+			}
 		}
 	}
 
 	go func() {
-		defer close(ch)
-		defer close(done)
+		defer func() {
+			if done != nil {
+				close(done)
+				done = nil
+			}
+			if ch != nil {
+				close(ch)
+				ch = nil
+			}
+		}()
 		for key, value := range m.data {
 			select {
 			case <-done:
@@ -140,7 +157,7 @@ func (m *MemoryMap[T]) Lock() {
 }
 func (m *MemoryMap[T]) Unlock() {
 	m.mut.Unlock()
-	_ = m.Save()
+	notifyChanged(m)
 }
 
 func (m *MemoryMap[T]) RLock() {
@@ -151,33 +168,76 @@ func (m *MemoryMap[T]) RUnlock() {
 }
 
 func (m *MemoryMap[T]) Save() error {
-	f, err := os.OpenFile(m.location, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	m.RLock()
+	defer m.RUnlock()
+
+	f, err := os.Create(m.location)
 	if err != nil {
-		return errors.Join(fmt.Errorf("failed to open file %s", m.location), err)
+		return errors.Join(fmt.Errorf("failed to open file '%s'", m.location), err)
 	}
 	encoder := json.NewEncoder(f)
 	if err := encoder.Encode(m.data); err != nil {
-		return errors.Join(fmt.Errorf("failed to encode json file %s", m.location), err)
+		return errors.Join(fmt.Errorf("failed to encode json file '%s'", m.location), err)
 	}
 	return nil
 }
 
 func LoadMap[T any](location string) (Map[T], error) {
 	if strings.HasSuffix(location, ".json") {
-		return loadMapFromJsonFile[T](location)
+		if m, err := loadMapFromJsonFile[T](location); err != nil {
+			return nil, errors.Join(fmt.Errorf("unable to load map from file '%s'", location), err)
+		} else {
+			return m, nil
+		}
 	}
-	return nil, fmt.Errorf("unable to find loader for %s", location)
+	return nil, fmt.Errorf("unable to find loader for '%s'", location)
 }
 
 func loadMapFromJsonFile[T any](location string) (Map[T], error) {
-	f, err := os.OpenFile(location, os.O_RDONLY, 0644)
+	f, err := os.Open(location)
 	if err != nil {
-		return nil, errors.Join(fmt.Errorf("failed to open file %s", location), err)
+		return nil, errors.Join(fmt.Errorf("failed to open file '%s'", location), err)
 	}
 	decoder := json.NewDecoder(f)
-	m := &MemoryMap[T]{}
+	m := &MemoryMap[T]{location: location}
 	if err := decoder.Decode(&m.data); err != nil {
-		return nil, errors.Join(fmt.Errorf("failed to decode json file %s", location), err)
+		return nil, errors.Join(fmt.Errorf("failed to decode json file '%s'", location), err)
 	}
 	return m, nil
+}
+
+func (m *MemoryMap[T]) getSaveTimer() *time.Timer {
+	m.timerMut.Lock()
+	defer m.timerMut.Unlock()
+	return m.saveTimer
+}
+
+func (m *MemoryMap[T]) setSaveTimer(t *time.Timer) {
+	m.timerMut.Lock()
+	defer m.timerMut.Unlock()
+	m.saveTimer = t
+}
+
+func (m *MemoryMap[T]) getMaxSaveTimer() *time.Timer {
+	m.timerMut.Lock()
+	defer m.timerMut.Unlock()
+	return m.maxSaveTimer
+}
+
+func (m *MemoryMap[T]) setMaxSaveTimer(t *time.Timer) {
+	m.timerMut.Lock()
+	defer m.timerMut.Unlock()
+	m.maxSaveTimer = t
+}
+
+func (m *MemoryMap[T]) getSaveOnce() *sync.Once {
+	m.timerMut.Lock()
+	defer m.timerMut.Unlock()
+	return m.saveOnce
+}
+
+func (m *MemoryMap[T]) setSaveOnce(o *sync.Once) {
+	m.timerMut.Lock()
+	defer m.timerMut.Unlock()
+	m.saveOnce = o
 }

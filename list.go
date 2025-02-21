@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 )
 
 type (
@@ -14,6 +15,11 @@ type (
 		data     []T
 		location string
 		mut      sync.RWMutex
+
+		timerMut     sync.Mutex
+		saveTimer    *time.Timer
+		maxSaveTimer *time.Timer
+		saveOnce     *sync.Once
 	}
 
 	List[T any] interface {
@@ -125,7 +131,7 @@ func (l *MemoryList[T]) Lock() {
 
 func (l *MemoryList[T]) Unlock() {
 	l.mut.Unlock()
-	_ = l.Save()
+	notifyChanged(l)
 }
 
 func (l *MemoryList[T]) RLock() {
@@ -137,28 +143,35 @@ func (l *MemoryList[T]) RUnlock() {
 }
 
 func (l *MemoryList[T]) Save() error {
-	f, err := os.OpenFile(l.location, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	l.RLock()
+	defer l.RUnlock()
+
+	f, err := os.Create(l.location)
 	if err != nil {
-		return errors.Join(fmt.Errorf("failed to open file %s", l.location), err)
+		return errors.Join(fmt.Errorf("failed to open file '%s'", l.location), err)
 	}
 	encoder := json.NewEncoder(f)
 	if err := encoder.Encode(l.data); err != nil {
-		return errors.Join(fmt.Errorf("failed to encode json file %s", l.location), err)
+		return errors.Join(fmt.Errorf("failed to encode json file '%s'", l.location), err)
 	}
 	return nil
 }
 
 func LoadList[T any](location string) (List[T], error) {
 	if strings.HasSuffix(location, ".json") {
-		return loadListFromJsonFile[T](location)
+		if l, err := loadListFromJsonFile[T](location); err != nil {
+			return nil, errors.Join(fmt.Errorf("unable to load list from file '%s'", location), err)
+		} else {
+			return l, nil
+		}
 	}
-	return nil, fmt.Errorf("unable to find loader for %s", location)
+	return nil, fmt.Errorf("unable to find loader for '%s'", location)
 }
 
 func loadListFromJsonFile[T any](location string) (List[T], error) {
-	f, err := os.OpenFile(location, os.O_RDONLY, 0644)
+	f, err := os.Open(location)
 	if err != nil {
-		return nil, errors.Join(fmt.Errorf("failed to open file %s", location), err)
+		return nil, errors.Join(fmt.Errorf("failed to open file '%s'", location), err)
 	}
 	decoder := json.NewDecoder(f)
 	l := &MemoryList[T]{
@@ -166,7 +179,43 @@ func loadListFromJsonFile[T any](location string) (List[T], error) {
 		data:     make([]T, 0),
 	}
 	if err := decoder.Decode(&l.data); err != nil {
-		return nil, errors.Join(fmt.Errorf("failed to decode json file %s", location), err)
+		return nil, errors.Join(fmt.Errorf("failed to decode json file '%s'", location), err)
 	}
 	return l, nil
+}
+
+func (l *MemoryList[T]) getSaveTimer() *time.Timer {
+	l.timerMut.Lock()
+	defer l.timerMut.Unlock()
+	return l.saveTimer
+}
+
+func (l *MemoryList[T]) setSaveTimer(t *time.Timer) {
+	l.timerMut.Lock()
+	defer l.timerMut.Unlock()
+	l.saveTimer = t
+}
+
+func (l *MemoryList[T]) getMaxSaveTimer() *time.Timer {
+	l.timerMut.Lock()
+	defer l.timerMut.Unlock()
+	return l.maxSaveTimer
+}
+
+func (l *MemoryList[T]) setMaxSaveTimer(t *time.Timer) {
+	l.timerMut.Lock()
+	defer l.timerMut.Unlock()
+	l.maxSaveTimer = t
+}
+
+func (l *MemoryList[T]) getSaveOnce() *sync.Once {
+	l.timerMut.Lock()
+	defer l.timerMut.Unlock()
+	return l.saveOnce
+}
+
+func (l *MemoryList[T]) setSaveOnce(o *sync.Once) {
+	l.timerMut.Lock()
+	defer l.timerMut.Unlock()
+	l.saveOnce = o
 }
