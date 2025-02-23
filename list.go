@@ -219,3 +219,27 @@ func (l *MemoryList[T]) setSaveOnce(o *sync.Once) {
 	defer l.timerMut.Unlock()
 	l.saveOnce = o
 }
+
+func (l *MemoryList[T]) WriteE(f func(l *MemoryList[T]) (any, error)) (any, error) {
+	l.Lock()
+	defer l.Unlock()
+	return f(l)
+}
+
+func (l *MemoryList[T]) Write(f func(l *MemoryList[T]) any) any {
+	l.Lock()
+	defer l.Unlock()
+	return f(l)
+}
+
+func (l *MemoryList[T]) ReadE(f func(l *MemoryList[T]) (any, error)) (any, error) {
+	l.RLock()
+	defer l.RUnlock()
+	return f(l)
+}
+
+func (l *MemoryList[T]) Read(f func(l *MemoryList[T]) any) any {
+	l.RLock()
+	defer l.RUnlock()
+	return f(l)
+}

@@ -241,3 +241,27 @@ func (m *MemoryMap[T]) setSaveOnce(o *sync.Once) {
 	defer m.timerMut.Unlock()
 	m.saveOnce = o
 }
+
+func (m *MemoryMap[T]) WriteE(f func(m *MemoryMap[T]) (any, error)) (any, error) {
+	m.Lock()
+	defer m.Unlock()
+	return f(m)
+}
+
+func (m *MemoryMap[T]) Write(f func(m *MemoryMap[T]) any) any {
+	m.Lock()
+	defer m.Unlock()
+	return f(m)
+}
+
+func (m *MemoryMap[T]) ReadE(f func(m *MemoryMap[T]) (any, error)) (any, error) {
+	m.RLock()
+	defer m.RUnlock()
+	return f(m)
+}
+
+func (m *MemoryMap[T]) Read(f func(m *MemoryMap[T]) any) any {
+	m.RLock()
+	defer m.RUnlock()
+	return f(m)
+}
