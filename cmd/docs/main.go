@@ -1,108 +1,33 @@
 package main
 
 import (
-	"bytes"
+	"flag"
 	"fmt"
 	"go/ast"
 	"go/doc"
 	"go/parser"
-	"go/printer"
 	"go/token"
 	"log"
+	"os"
 	"sort"
+	"strings"
 )
 
-// nodeToString pretty–prints an AST node using the provided file set.
-func nodeToString(fset *token.FileSet, node interface{}) string {
-	var buf bytes.Buffer
-	if err := printer.Fprint(&buf, fset, node); err != nil {
-		return ""
-	}
-	return buf.String()
-}
-
-// FunctionInfo holds details about a function/method.
-type FunctionInfo struct {
-	Name       string
-	Doc        string
-	Signature  string
-	TypeParams string // Holds generic type parameter information (if any).
-}
-
-// interfaceMethodSignature formats an interface method as a fake function declaration.
-// It also returns the type parameters (if any) as a separate string.
-func interfaceMethodSignature(
-	fset *token.FileSet, field *ast.Field, methodName string,
-) (string, string) {
-	var tp string
-	if ftype, ok := field.Type.(*ast.FuncType); ok {
-		// If there are type parameters, extract them.
-		if ftype.TypeParams != nil {
-			tp = nodeToString(fset, ftype.TypeParams)
-		}
-		// Create a fake function declaration for formatting.
-		fn := &ast.FuncDecl{
-			Name: ast.NewIdent(methodName),
-			Type: ftype,
-		}
-		return nodeToString(fset, fn), tp
-	}
-	return nodeToString(fset, field), tp
-}
-
-// extractInterfaceMethods returns the list of methods declared
-// directly on an interface type.
-func extractInterfaceMethods(
-	fset *token.FileSet, typ *doc.Type,
-) []FunctionInfo {
-	methods := []FunctionInfo{}
-	// typ.Decl is a *ast.GenDecl. We expect one TypeSpec.
-	if typ.Decl == nil || len(typ.Decl.Specs) == 0 {
-		return methods
-	}
-	ts, ok := typ.Decl.Specs[0].(*ast.TypeSpec)
-	if !ok {
-		return methods
-	}
-	iface, ok := ts.Type.(*ast.InterfaceType)
-	if !ok {
-		return methods
-	}
-	// Iterate over the fields in the interface.
-	for _, field := range iface.Methods.List {
-		// Embedded interfaces have no names; skip them.
-		if len(field.Names) == 0 {
-			continue
-		}
-		for _, name := range field.Names {
-			// Only include exported interface methods.
-			if !ast.IsExported(name.Name) {
-				continue
-			}
-			var tp string
-			if field.Doc != nil {
-				// field.Doc comes from the interface method declaration.
-			}
-			// Generate a signature and extract type parameters.
-			sig, tp := interfaceMethodSignature(fset, field, name.Name)
-			methodDoc := ""
-			if field.Doc != nil {
-				methodDoc = field.Doc.Text()
-			} else if field.Comment != nil {
-				methodDoc = field.Comment.Text()
-			}
-			methods = append(methods, FunctionInfo{
-				Name:       name.Name,
-				Doc:        methodDoc,
-				Signature:  sig,
-				TypeParams: tp,
-			})
-		}
-	}
-	return methods
-}
+var (
+	outDir = flag.String("o", "./docs", "output directly for generated documentation")
+)
 
 func main() {
+	flag.Parse()
+
+	defer echoClose()
+
+	if err := os.MkdirAll(*outDir, 0777); err != nil && !os.IsExist(err) {
+		log.Fatalf("Error creating output directly: %v", err)
+	}
+
+	clearDir(*outDir)
+
 	fset := token.NewFileSet()
 	// Parse the current directory with comments.
 	pkgs, err := parser.ParseDir(fset, ".", nil, parser.ParseComments)
@@ -113,6 +38,9 @@ func main() {
 	// Use the first package found.
 	var apkg *doc.Package
 	for _, pkg := range pkgs {
+		if strings.HasSuffix(pkg.Name, "_test") {
+			continue
+		}
 		// The "./" import path is just a placeholder.
 		apkg = doc.New(pkg, "./", doc.AllDecls)
 		break
@@ -122,36 +50,33 @@ func main() {
 	}
 
 	// Package header.
-	fmt.Printf("# Package %s\n\n", apkg.Name)
+	echo(fmt.Sprintf("# Package %s\n\n", apkg.Name), *outDir, "Home.md")
 	if apkg.Doc != "" {
-		fmt.Printf("%s\n\n", apkg.Doc)
+		echo(fmt.Sprintf("%s\n\n", md(apkg.Markdown(apkg.Doc))), *outDir, "Home.md")
 	}
 
 	// Document package-level functions.
 	if len(apkg.Funcs) > 0 {
-		fmt.Print("## Functions\n\n")
 		// Sort functions alphabetically.
 		sort.Slice(apkg.Funcs, func(i, j int) bool {
 			return apkg.Funcs[i].Name < apkg.Funcs[j].Name
 		})
 		for _, fn := range apkg.Funcs {
-			fmt.Printf("### %s\n\n", fn.Name)
 			// If function is generic, print type parameters.
 			tpl := nodeToString(fset, fn.Decl.Type.TypeParams)
 			if len(tpl) != 0 {
-				fmt.Printf("**Type Parameters:** %s\n\n", tpl)
+				echo(fmt.Sprintf("**Type Parameters:** %s\n\n", tpl), *outDir, "func", fn.Name+".md")
 			}
 			if fn.Doc != "" {
-				fmt.Printf("%s\n\n", fn.Doc)
+				echo(fmt.Sprintf("%s\n\n", fn.Doc), *outDir, "func", fn.Name+".md")
 			}
 			signature := nodeToString(fset, fn.Decl)
-			fmt.Printf("```go\n%s\n```\n\n", signature)
+			echo(fmt.Sprintf("```go\n%s\n```\n\n", signature), *outDir, "func", fn.Name+".md")
 		}
 	}
 
 	// Document only exported types.
 	if len(apkg.Types) > 0 {
-		fmt.Print("## Types\n\n")
 		var types []*doc.Type
 		// Filter out private types.
 		for _, typ := range apkg.Types {
@@ -164,7 +89,6 @@ func main() {
 			return types[i].Name < types[j].Name
 		})
 		for _, typ := range types {
-			fmt.Printf("### %s\n\n", typ.Name)
 			// Obtain the TypeSpec from the declaration.
 			var ts *ast.TypeSpec
 			if typ.Decl != nil && len(typ.Decl.Specs) > 0 {
@@ -174,16 +98,16 @@ func main() {
 			if ts != nil && ts.TypeParams != nil {
 				tp := nodeToString(fset, ts.TypeParams)
 				if len(tp) != 0 {
-					fmt.Printf("**Type Parameters:** %s\n\n", tp)
+					echo(fmt.Sprintf("**Type Parameters:** %s\n\n", tp), *outDir, "type", typ.Name+".md")
 				}
 			}
 			if typ.Doc != "" {
-				fmt.Printf("%s\n\n", typ.Doc)
+				echo(fmt.Sprintf("%s\n\n", typ.Doc), *outDir, "type", typ.Name+".md")
 			}
 
 			signature := nodeToString(fset, typ.Decl)
 			if len(signature) < 80 {
-				fmt.Printf("```go\n%s\n```\n\n", signature)
+				echo(fmt.Sprintf("```go\n%s\n```\n\n", signature), *outDir, "type", typ.Name+".md")
 			}
 
 			// Gather methods.
@@ -216,7 +140,7 @@ func main() {
 
 			// If there are methods, document them.
 			if len(methodMap) > 0 {
-				fmt.Print("#### Methods\n\n")
+				echo("## Methods\n\n", *outDir, "type", typ.Name+".md")
 				var mNames []string
 				for name := range methodMap {
 					mNames = append(mNames, name)
@@ -224,18 +148,19 @@ func main() {
 				sort.Strings(mNames)
 				for _, name := range mNames {
 					m := methodMap[name]
-					fmt.Printf("##### %s\n\n", m.Name)
+					echo(fmt.Sprintf("### %s\n\n", m.Name), *outDir, "type", typ.Name+".md")
 					if m.TypeParams != "" {
-						fmt.Printf("**Type Parameters:** %s\n\n", m.TypeParams)
+						echo(fmt.Sprintf("**Type Parameters:** %s\n\n", m.TypeParams), *outDir, "type", typ.Name+".md")
 					}
 					if m.Doc != "" {
-						fmt.Printf("%s\n\n", m.Doc)
+						echo(fmt.Sprintf("%s\n\n", m.Doc), *outDir, "type", typ.Name+".md")
 					}
 					if m.Signature != "" {
-						fmt.Printf("```go\n%s\n```\n\n", m.Signature)
+						echo(fmt.Sprintf("```go\n%s\n```\n\n", m.Signature), *outDir, "type", typ.Name+".md")
 					}
 				}
 			}
 		}
 	}
 }
+

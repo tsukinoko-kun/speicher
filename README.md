@@ -10,6 +10,6 @@ Speicher is a lightweight, data store.
 go get -u github.com/tsukinoko-kun/speicher
 ```
 
-Look at [DOCS.md] for the documentation.
+Look at the [wiki](https://github.com/tsukinoko-kun/speicher/wiki) for the documentation.
 
 ![](https://i.imgflip.com/9f9pu3.jpg)
