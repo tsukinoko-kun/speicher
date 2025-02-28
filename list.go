@@ -23,7 +23,8 @@ type (
 		saveOnce     *sync.Once
 	}
 
-	// List data store
+	// List is a thread-safe list data store interface that provides basic
+	// CRUD operations, predicate-based search, and iteration functionality.
 	List[T any] interface {
 		// Get returns the value at a given index of the List and a bool that indicates whether the index exists or not.
 		// If no element is found, the bool result will be false.
@@ -64,12 +65,14 @@ type (
 		Save() error
 
 		// Lock acquires an exclusive lock on the List to ensure thread-safe operations.
+		// Don't forget to use Unlock when you are done.
 		Lock()
 
 		// Unlock releases the exclusive lock previously acquired with Lock.
 		Unlock()
 
 		// RLock acquires a read lock on the List to allow concurrent read operations.
+		// Don't forget to use RUnlock when you are done.
 		RLock()
 
 		// RUnlock releases the read lock acquired with RLock.

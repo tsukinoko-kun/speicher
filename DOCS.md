@@ -4,6 +4,9 @@
 
 ### Err
 
+Err returns the error channel used when saving the data stores to disk.
+
+
 ```go
 func Err() <-chan error
 ```
@@ -60,7 +63,8 @@ func notifyChanged(s savable)
 
 ### List
 
-List data store
+List is a thread-safe list data store interface that provides basic
+CRUD operations, predicate-based search, and iteration functionality.
 
 
 #### Methods
@@ -127,6 +131,7 @@ func Len() int
 ##### Lock
 
 Lock acquires an exclusive lock on the List to ensure thread-safe operations.
+Don't forget to use Unlock when you are done.
 
 
 ```go
@@ -145,6 +150,7 @@ func Overwrite([]T)
 ##### RLock
 
 RLock acquires a read lock on the List to allow concurrent read operations.
+Don't forget to use RUnlock when you are done.
 
 
 ```go
@@ -201,12 +207,17 @@ func Unlock()
 
 ### Map
 
-Update the interface first
+Map is a thread-safe key-value data store interface that provides basic
+CRUD operations, predicate-based search, and iteration functionality.
 
 
 #### Methods
 
 ##### Find
+
+Find searches for an element that satisfies the given predicate.
+It returns the found value and a boolean indicating if a match was found.
+
 
 ```go
 func Find(func(T) bool) (value T, found bool)
@@ -214,11 +225,19 @@ func Find(func(T) bool) (value T, found bool)
 
 ##### FindAll
 
+FindAll retrieves all elements that satisfy the given predicate.
+It returns a slice containing all matching elements.
+
+
 ```go
 func FindAll(func(T) bool) (values []T)
 ```
 
 ##### Get
+
+Get retrieves an element associated with the given key.
+It returns the value and a boolean indicating whether the key exists.
+
 
 ```go
 func Get(key string) (T, bool)
@@ -226,11 +245,19 @@ func Get(key string) (T, bool)
 
 ##### Has
 
+Has checks if an element with the given key exists in the data store.
+It returns true if the key exists.
+
+
 ```go
 func Has(key string) bool
 ```
 
 ##### Lock
+
+Lock acquires the write lock for the data store to allow safe updates.
+Don't forget to use Unlock when you are done.
+
 
 ```go
 func Lock()
@@ -238,11 +265,18 @@ func Lock()
 
 ##### Overwrite
 
+Overwrite replaces the entire data store with the provided map.
+
+
 ```go
 func Overwrite(map[string]T)
 ```
 
 ##### RLock
+
+RLock acquires the read lock for the data store to allow safe reading.
+Don't forget to use RUnlock when you are done.
+
 
 ```go
 func RLock()
@@ -250,11 +284,19 @@ func RLock()
 
 ##### RUnlock
 
+RUnlock releases the read lock for the data store.
+
+
 ```go
 func RUnlock()
 ```
 
 ##### RangeKV
+
+RangeKV returns a read-only channel that emits key-value pair elements
+(as MapRangeEl) from the data store, along with a cancellation function
+to terminate the iteration when desired.
+
 
 ```go
 func RangeKV() (<-chan MapRangeEl[T], func())
@@ -262,11 +304,19 @@ func RangeKV() (<-chan MapRangeEl[T], func())
 
 ##### RangeV
 
+RangeV returns a read-only channel that emits only the values stored in the
+data store, along with a cancellation function to terminate the iteration.
+
+
 ```go
 func RangeV() (<-chan T, func())
 ```
 
 ##### Save
+
+Save persists the current state of the data store.
+It returns an error if the save operation fails.
+
 
 ```go
 func Save() error
@@ -274,17 +324,27 @@ func Save() error
 
 ##### Set
 
+Set adds or updates the element associated with the given key.
+If the key already exists, its value is overwritten.
+
+
 ```go
 func Set(key string, value T)
 ```
 
 ##### Unlock
 
+Unlock releases the write lock for the data store.
+
+
 ```go
 func Unlock()
 ```
 
 ### MapRangeEl
+
+MapRangeEl represents a key-value pair element emitted by the Map's RangeKV method.
+
 
 ```go
 type MapRangeEl[T any] struct {
@@ -293,132 +353,15 @@ type MapRangeEl[T any] struct {
 }
 ```
 
-### MemoryMap
-
-#### Methods
-
-##### Find
-
-```go
-func (m *MemoryMap[T]) Find(f func(T) bool) (value T, found bool)
-```
-
-##### FindAll
-
-```go
-func (m *MemoryMap[T]) FindAll(f func(T) bool) (values []T)
-```
-
-##### Get
-
-```go
-func (m *MemoryMap[T]) Get(key string) (value T, found bool)
-```
-
-##### Has
-
-```go
-func (m *MemoryMap[T]) Has(key string) bool
-```
-
-##### Lock
-
-```go
-func (m *MemoryMap[T]) Lock()
-```
-
-##### Overwrite
-
-```go
-func (m *MemoryMap[T]) Overwrite(values map[string]T)
-```
-
-##### RLock
-
-```go
-func (m *MemoryMap[T]) RLock()
-```
-
-##### RUnlock
-
-```go
-func (m *MemoryMap[T]) RUnlock()
-```
-
-##### RangeKV
-
-Update RangeKV method
-
-
-```go
-func (m *MemoryMap[T]) RangeKV() (<-chan MapRangeEl[T], func())
-```
-
-##### RangeV
-
-Update RangeV method
-
-
-```go
-func (m *MemoryMap[T]) RangeV() (<-chan T, func())
-```
-
-##### Read
-
-```go
-func (m *MemoryMap[T]) Read(f func(m *MemoryMap[T]) any) any
-```
-
-##### ReadE
-
-```go
-func (m *MemoryMap[T]) ReadE(f func(m *MemoryMap[T]) (any, error)) (any, error)
-```
-
-##### Save
-
-```go
-func (m *MemoryMap[T]) Save() error
-```
-
-##### Set
-
-```go
-func (m *MemoryMap[T]) Set(key string, value T)
-```
-
-##### Unlock
-
-```go
-func (m *MemoryMap[T]) Unlock()
-```
-
-##### Write
-
-```go
-func (m *MemoryMap[T]) Write(f func(m *MemoryMap[T]) any) any
-```
-
-##### WriteE
-
-```go
-func (m *MemoryMap[T]) WriteE(f func(m *MemoryMap[T]) (any, error)) (any, error)
-```
-
 ### Store
 
-```go
-type Store interface {
-	Lock()
-	Unlock()
-	RLock()
-	RUnlock()
-}
-```
-
 #### Methods
 
 ##### Lock
+
+Lock acquires the write lock for the data store to allow safe updates.
+Don't forget to use Unlock when you are done.
+
 
 ```go
 func Lock()
@@ -426,17 +369,27 @@ func Lock()
 
 ##### RLock
 
+RLock acquires the read lock for the data store to allow safe reading.
+Don't forget to use RUnlock when you are done.
+
+
 ```go
 func RLock()
 ```
 
 ##### RUnlock
 
+RUnlock releases the read lock for the data store.
+
+
 ```go
 func RUnlock()
 ```
 
 ##### Unlock
+
+Unlock releases the write lock for the data store.
+
 
 ```go
 func Unlock()

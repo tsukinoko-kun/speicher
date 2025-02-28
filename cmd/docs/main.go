@@ -23,14 +23,38 @@ func nodeToString(fset *token.FileSet, node interface{}) string {
 
 // FunctionInfo holds details about a function/method.
 type FunctionInfo struct {
-	Name      string
-	Doc       string
-	Signature string
+	Name       string
+	Doc        string
+	Signature  string
+	TypeParams string // Holds generic type parameter information (if any).
+}
+
+// interfaceMethodSignature formats an interface method as a fake function declaration.
+// It also returns the type parameters (if any) as a separate string.
+func interfaceMethodSignature(
+	fset *token.FileSet, field *ast.Field, methodName string,
+) (string, string) {
+	var tp string
+	if ftype, ok := field.Type.(*ast.FuncType); ok {
+		// If there are type parameters, extract them.
+		if ftype.TypeParams != nil {
+			tp = nodeToString(fset, ftype.TypeParams)
+		}
+		// Create a fake function declaration for formatting.
+		fn := &ast.FuncDecl{
+			Name: ast.NewIdent(methodName),
+			Type: ftype,
+		}
+		return nodeToString(fset, fn), tp
+	}
+	return nodeToString(fset, field), tp
 }
 
 // extractInterfaceMethods returns the list of methods declared
 // directly on an interface type.
-func extractInterfaceMethods(fset *token.FileSet, typ *doc.Type) []FunctionInfo {
+func extractInterfaceMethods(
+	fset *token.FileSet, typ *doc.Type,
+) []FunctionInfo {
 	methods := []FunctionInfo{}
 	// typ.Decl is a *ast.GenDecl. We expect one TypeSpec.
 	if typ.Decl == nil || len(typ.Decl.Specs) == 0 {
@@ -55,35 +79,27 @@ func extractInterfaceMethods(fset *token.FileSet, typ *doc.Type) []FunctionInfo 
 			if !ast.IsExported(name.Name) {
 				continue
 			}
+			var tp string
+			if field.Doc != nil {
+				// field.Doc comes from the interface method declaration.
+			}
+			// Generate a signature and extract type parameters.
+			sig, tp := interfaceMethodSignature(fset, field, name.Name)
 			methodDoc := ""
 			if field.Doc != nil {
 				methodDoc = field.Doc.Text()
 			} else if field.Comment != nil {
 				methodDoc = field.Comment.Text()
 			}
-			methodSig := interfaceMethodSignature(fset, field, name.Name)
 			methods = append(methods, FunctionInfo{
-				Name:      name.Name,
-				Doc:       methodDoc,
-				Signature: methodSig,
+				Name:       name.Name,
+				Doc:        methodDoc,
+				Signature:  sig,
+				TypeParams: tp,
 			})
 		}
 	}
 	return methods
-}
-
-func interfaceMethodSignature(
-	fset *token.FileSet, field *ast.Field, methodName string,
-) string {
-	if ftype, ok := field.Type.(*ast.FuncType); ok {
-		// Create a fake function declaration for formatting.
-		fn := &ast.FuncDecl{
-			Name: ast.NewIdent(methodName),
-			Type: ftype,
-		}
-		return nodeToString(fset, fn)
-	}
-	return nodeToString(fset, field)
 }
 
 func main() {
@@ -114,15 +130,21 @@ func main() {
 	// Document package-level functions.
 	if len(apkg.Funcs) > 0 {
 		fmt.Print("## Functions\n\n")
+		// Sort functions alphabetically.
 		sort.Slice(apkg.Funcs, func(i, j int) bool {
 			return apkg.Funcs[i].Name < apkg.Funcs[j].Name
 		})
 		for _, fn := range apkg.Funcs {
 			fmt.Printf("### %s\n\n", fn.Name)
-			signature := nodeToString(fset, fn.Decl)
+			// If function is generic, print type parameters.
+			tpl := nodeToString(fset, fn.Decl.Type.TypeParams)
+			if len(tpl) != 0 {
+				fmt.Printf("**Type Parameters:** %s\n\n", tpl)
+			}
 			if fn.Doc != "" {
 				fmt.Printf("%s\n\n", fn.Doc)
 			}
+			signature := nodeToString(fset, fn.Decl)
 			fmt.Printf("```go\n%s\n```\n\n", signature)
 		}
 	}
@@ -130,8 +152,8 @@ func main() {
 	// Document only exported types.
 	if len(apkg.Types) > 0 {
 		fmt.Print("## Types\n\n")
-		// Filter out private types.
 		var types []*doc.Type
+		// Filter out private types.
 		for _, typ := range apkg.Types {
 			if !ast.IsExported(typ.Name) {
 				continue
@@ -143,21 +165,30 @@ func main() {
 		})
 		for _, typ := range types {
 			fmt.Printf("### %s\n\n", typ.Name)
-			signature := nodeToString(fset, typ.Decl)
+			// Obtain the TypeSpec from the declaration.
+			var ts *ast.TypeSpec
+			if typ.Decl != nil && len(typ.Decl.Specs) > 0 {
+				ts, _ = typ.Decl.Specs[0].(*ast.TypeSpec)
+			}
+			// If the type is generic, display its type parameters.
+			if ts != nil && ts.TypeParams != nil {
+				tp := nodeToString(fset, ts.TypeParams)
+				if len(tp) != 0 {
+					fmt.Printf("**Type Parameters:** %s\n\n", tp)
+				}
+			}
 			if typ.Doc != "" {
 				fmt.Printf("%s\n\n", typ.Doc)
 			}
-			if len(signature) < 100 {
+
+			signature := nodeToString(fset, typ.Decl)
+			if len(signature) < 80 {
 				fmt.Printf("```go\n%s\n```\n\n", signature)
 			}
 
 			// Gather methods.
 			methodMap := make(map[string]FunctionInfo)
 			// For interface types, extract methods declared in the type literal.
-			var ts *ast.TypeSpec
-			if typ.Decl != nil && len(typ.Decl.Specs) > 0 {
-				ts, _ = typ.Decl.Specs[0].(*ast.TypeSpec)
-			}
 			if ts != nil {
 				if _, ok := ts.Type.(*ast.InterfaceType); ok {
 					ifaceMethods := extractInterfaceMethods(fset, typ)
@@ -168,23 +199,24 @@ func main() {
 			}
 			// Include methods associated via separate functions.
 			for _, m := range typ.Methods {
-				// Even though these are methods on a type, check again if they are
-				// exported.
+				// Only include exported methods.
 				if !ast.IsExported(m.Name) {
 					continue
 				}
 				mSig := nodeToString(fset, m.Decl)
+				tp := ""
+				tp = nodeToString(fset, m.Decl.Type.TypeParams)
 				methodMap[m.Name] = FunctionInfo{
-					Name:      m.Name,
-					Doc:       m.Doc,
-					Signature: mSig,
+					Name:       m.Name,
+					Doc:        m.Doc,
+					Signature:  mSig,
+					TypeParams: tp,
 				}
 			}
 
 			// If there are methods, document them.
 			if len(methodMap) > 0 {
 				fmt.Print("#### Methods\n\n")
-				// Sort methods alphabetically.
 				var mNames []string
 				for name := range methodMap {
 					mNames = append(mNames, name)
@@ -193,6 +225,9 @@ func main() {
 				for _, name := range mNames {
 					m := methodMap[name]
 					fmt.Printf("##### %s\n\n", m.Name)
+					if m.TypeParams != "" {
+						fmt.Printf("**Type Parameters:** %s\n\n", m.TypeParams)
+					}
 					if m.Doc != "" {
 						fmt.Printf("%s\n\n", m.Doc)
 					}
