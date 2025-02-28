@@ -6,6 +6,7 @@ import (
 	"go/doc"
 	"go/printer"
 	"go/token"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -163,5 +164,16 @@ func clearDir(dir string) {
 			continue
 		}
 		_ = os.RemoveAll(filepath.Join(dir, e.Name()))
+	}
+}
+
+func writeFooter(destination ...string) {
+	f := echoFile(filepath.Join(destination...))
+
+	if licenseF, err := os.Open("LICENSE"); err == nil {
+		_, _ = io.Copy(f, licenseF)
+		_ = licenseF.Close()
+	} else {
+		_, _ = f.WriteString("All rights reserved")
 	}
 }

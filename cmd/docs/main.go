@@ -51,24 +51,30 @@ func main() {
 
 	// Package header.
 	echo(fmt.Sprintf("# Package %s\n\n", apkg.Name), *outDir, "Home.md")
+	echo(fmt.Sprintf("- [%s](Home)\n", apkg.Name), *outDir, "_Sidebar.md")
 	if apkg.Doc != "" {
 		echo(fmt.Sprintf("%s\n\n", md(apkg.Markdown(apkg.Doc))), *outDir, "Home.md")
 	}
 
 	// Document package-level functions.
 	if len(apkg.Funcs) > 0 {
+		echo("- Functions\n", *outDir, "_Sidebar.md")
 		// Sort functions alphabetically.
 		sort.Slice(apkg.Funcs, func(i, j int) bool {
 			return apkg.Funcs[i].Name < apkg.Funcs[j].Name
 		})
 		for _, fn := range apkg.Funcs {
+			if !ast.IsExported(fn.Name) {
+				continue
+			}
+			echo(fmt.Sprintf("  - [%s](%s)\n", fn.Name, fn.Name), *outDir, "_Sidebar.md")
 			// If function is generic, print type parameters.
 			tpl := nodeToString(fset, fn.Decl.Type.TypeParams)
 			if len(tpl) != 0 {
 				echo(fmt.Sprintf("**Type Parameters:** %s\n\n", tpl), *outDir, "func", fn.Name+".md")
 			}
 			if fn.Doc != "" {
-				echo(fmt.Sprintf("%s\n\n", fn.Doc), *outDir, "func", fn.Name+".md")
+				echo(fmt.Sprintf("%s\n\n", md(apkg.Markdown(fn.Doc))), *outDir, "func", fn.Name+".md")
 			}
 			signature := nodeToString(fset, fn.Decl)
 			echo(fmt.Sprintf("```go\n%s\n```\n\n", signature), *outDir, "func", fn.Name+".md")
@@ -77,6 +83,7 @@ func main() {
 
 	// Document only exported types.
 	if len(apkg.Types) > 0 {
+		echo("- Types\n", *outDir, "_Sidebar.md")
 		var types []*doc.Type
 		// Filter out private types.
 		for _, typ := range apkg.Types {
@@ -89,6 +96,7 @@ func main() {
 			return types[i].Name < types[j].Name
 		})
 		for _, typ := range types {
+			echo(fmt.Sprintf("  - [%s](%s)\n", typ.Name, typ.Name), *outDir, "_Sidebar.md")
 			// Obtain the TypeSpec from the declaration.
 			var ts *ast.TypeSpec
 			if typ.Decl != nil && len(typ.Decl.Specs) > 0 {
@@ -162,5 +170,6 @@ func main() {
 			}
 		}
 	}
-}
 
+	writeFooter(*outDir, "_Footer.md")
+}
