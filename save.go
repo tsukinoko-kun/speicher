@@ -18,6 +18,7 @@ type savable interface {
 
 var errChan chan error = nil
 
+// Err returns the error channel used when saving the data stores to disk.
 func Err() <-chan error {
 	if errChan == nil {
 		errChan = make(chan error)
