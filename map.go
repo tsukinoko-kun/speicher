@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -233,12 +234,16 @@ func LoadMap[T any](location string) (Map[T], error) {
 }
 
 func loadMapFromJsonFile[T any](location string) (Map[T], error) {
+	m := &memoryMap[T]{data: make(map[string]T), location: location}
 	f, err := os.Open(location)
 	if err != nil {
+		if os.IsNotExist(err) {
+			err = os.MkdirAll(filepath.Dir(location), 0740)
+			return m, err
+		}
 		return nil, errors.Join(fmt.Errorf("failed to open file '%s'", location), err)
 	}
 	decoder := json.NewDecoder(f)
-	m := &memoryMap[T]{location: location}
 	if err := decoder.Decode(&m.data); err != nil {
 		return nil, errors.Join(fmt.Errorf("failed to decode json file '%s'", location), err)
 	}

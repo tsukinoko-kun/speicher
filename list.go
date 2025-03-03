@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -212,15 +213,19 @@ func LoadList[T any](location string) (List[T], error) {
 }
 
 func loadListFromJsonFile[T any](location string) (List[T], error) {
-	f, err := os.Open(location)
-	if err != nil {
-		return nil, errors.Join(fmt.Errorf("failed to open file '%s'", location), err)
-	}
-	decoder := json.NewDecoder(f)
 	l := &memoryList[T]{
 		location: location,
 		data:     make([]T, 0),
 	}
+	f, err := os.Open(location)
+	if err != nil {
+		if os.IsNotExist(err) {
+			err = os.MkdirAll(filepath.Dir(location), 0740)
+			return l, err
+		}
+		return nil, errors.Join(fmt.Errorf("failed to open file '%s'", location), err)
+	}
+	decoder := json.NewDecoder(f)
 	if err := decoder.Decode(&l.data); err != nil {
 		return nil, errors.Join(fmt.Errorf("failed to decode json file '%s'", location), err)
 	}
