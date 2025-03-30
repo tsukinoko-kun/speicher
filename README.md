@@ -1,6 +1,7 @@
 # Speicher
 
-WORK IN PROGRESS
+> [!WARNING]
+> This repository is deprecated. For the latest version check out [bloodmagesoftware/speicher](https://github.com/bloodmagesoftware/speicher)
 
 Pronunciation: [[ˈʃpaɪ̯çɐ]](https://upload.wikimedia.org/wikipedia/commons/2/21/De-speicher.ogg)
 
